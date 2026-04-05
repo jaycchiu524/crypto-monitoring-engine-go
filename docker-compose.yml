@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  engine-fetcher:
+    build: 
+      context: ./go
+      dockerfile: Dockerfile
+    environment:
+      - APP_ROLE=fetcher
+      - REDIS_URL=redis:6379
+      - SYMBOL=btcusdt
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  engine-processor:
+    build:
+      context: ./go
+      dockerfile: Dockerfile
+    environment:
+      - APP_ROLE=processor
+      - REDIS_URL=redis:6379
+      - SYMBOL=btcusdt
+    depends_on:
+      - redis
+    restart: unless-stopped
