@@ -32,6 +32,7 @@ vendor/
 *.retry
 ansible/k3s-homelab.yaml
 ansible/*.yaml
+ansible/redis-secret.yaml
 *.tar
 
 # --- Docker ---

@@ -11,6 +11,12 @@
         - "'already exists' not in ns_create.stderr"
       changed_when: "'created' in ns_create.stdout"
 
+    - name: Apply Local Redis Secret (Bypassing Git)
+      command: /usr/local/bin/k3s kubectl apply -f -
+      args:
+        stdin: "{{ lookup('file', 'redis-secret.yaml') }}"
+      changed_when: false
+
     - name: Install ArgoCD from stable manifests
       command: /usr/local/bin/k3s kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
       changed_when: false # Standard install manifests are idempotent but noisy
