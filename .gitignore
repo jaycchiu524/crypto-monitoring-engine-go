@@ -30,6 +30,9 @@ vendor/
 
 # --- Ansible ---
 *.retry
+ansible/k3s-homelab.yaml
+ansible/*.yaml
+*.tar
 
 # --- Docker ---
 .env
