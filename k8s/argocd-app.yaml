@@ -8,7 +8,7 @@ spec:
   project: default
   source:
     repoURL: 'https://github.com/jaycchiu524/crypto-monitoring-engine-go.git'
-    targetRevision: develop
+    targetRevision: main
     path: k8s
   destination:
     server: 'https://kubernetes.default.svc'
