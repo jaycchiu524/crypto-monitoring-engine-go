@@ -20,8 +20,8 @@ spec:
         fsGroup: 1000
       containers:
       - name: fetcher
-        image: crypto-monitor:latest
-        imagePullPolicy: Never
+        image: ghcr.io/jaycchiu524/crypto-monitoring-engine-go:latest
+        imagePullPolicy: Always
         env:
         - name: APP_ROLE
           value: "fetcher"
@@ -62,8 +62,8 @@ spec:
         fsGroup: 1000
       containers:
       - name: processor
-        image: crypto-monitor:latest
-        imagePullPolicy: Never
+        image: ghcr.io/jaycchiu524/crypto-monitoring-engine-go:latest
+        imagePullPolicy: Always
         ports:
         - containerPort: 8080
           name: metrics
