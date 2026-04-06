@@ -14,10 +14,11 @@ type RedisBroker struct {
 	logger *slog.Logger
 }
 
-// NewRedisBroker creates a new broker pointing to the specified URL
-func NewRedisBroker(redisAddr string, logger *slog.Logger) (*RedisBroker, error) {
+// NewRedisBroker creates a new broker pointing to the specified URL and password
+func NewRedisBroker(redisAddr string, redisPassword string, logger *slog.Logger) (*RedisBroker, error) {
 	client := redis.NewClient(&redis.Options{
-		Addr: redisAddr,
+		Addr:     redisAddr,
+		Password: redisPassword,
 	})
 
 	// PING the server to ensure we can connect right at startup

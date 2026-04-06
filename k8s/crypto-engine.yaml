@@ -1,6 +1,5 @@
 ---
 # --- Fetcher Service ---
-# The fetcher pod is responsible for connecting to Binance and publishing to Redis inside the cluster.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -15,10 +14,14 @@ spec:
       labels:
         app: engine-fetcher
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
       containers:
       - name: fetcher
         image: crypto-monitor:latest
-        imagePullPolicy: Never # Critical: Tells K8s to use the manually imported image instead of pulling
+        imagePullPolicy: Never
         env:
         - name: APP_ROLE
           value: "fetcher"
@@ -32,9 +35,13 @@ spec:
             configMapKeyRef:
               name: crypto-config
               key: REDIS_URL
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: redis-secret
+              key: REDIS_PASSWORD
 ---
 # --- Processor Service ---
-# The processor pod subscribes to Redis and exposes Prometheus metrics.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -49,10 +56,14 @@ spec:
       labels:
         app: engine-processor
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
       containers:
       - name: processor
         image: crypto-monitor:latest
-        imagePullPolicy: Never # Critical: K8s uses the image manually imported into the node
+        imagePullPolicy: Never
         ports:
         - containerPort: 8080
           name: metrics
@@ -69,9 +80,13 @@ spec:
             configMapKeyRef:
               name: crypto-config
               key: REDIS_URL
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: redis-secret
+              key: REDIS_PASSWORD
 ---
 # --- Metrics Service ---
-# Exposes the processor's metrics port outside the cluster (via NodePort 30080).
 apiVersion: v1
 kind: Service
 metadata:
@@ -84,4 +99,4 @@ spec:
   - protocol: TCP
     port: 8080
     targetPort: 8080
-    nodePort: 30080 # This allows your Mac's Prometheus to reach the metrics at 192.168.1.200:30080
+    nodePort: 30080

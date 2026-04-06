@@ -62,6 +62,7 @@ func main() {
 	if redisURL == "" {
 		redisURL = "localhost:6379"
 	}
+	redisPassword := os.Getenv("REDIS_PASSWORD") // "" by default, which is handled by the broker
 
 	logger.Info("Starting Crypto Monitoring Engine", 
 		"version", "0.4.0", 
@@ -72,7 +73,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	redisBroker, err := broker.NewRedisBroker(redisURL, logger)
+	redisBroker, err := broker.NewRedisBroker(redisURL, redisPassword, logger)
 	if err != nil {
 		logger.Error("Failed to initialize Redis Broker", "error", err)
 		os.Exit(1)

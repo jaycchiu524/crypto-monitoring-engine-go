@@ -1,12 +1,19 @@
 ---
 apiVersion: v1
+kind: Secret
+metadata:
+  name: redis-secret
+type: Opaque
+stringData:
+  # Generate a secure random string for production.
+  REDIS_PASSWORD: "crypto-secure-password-2026"
+---
+apiVersion: v1
 kind: ConfigMap
 metadata:
   name: crypto-config
 data:
-  # Comma-separated list of symbols to monitor
   SYMBOLS: "btcusdt,ethusdt,solusdt,bnbusdt,xrpusdt"
-  # Internal Redis service name (used by both fetcher and processor)
   REDIS_URL: "redis:6379"
 ---
 apiVersion: apps/v1
@@ -23,9 +30,20 @@ spec:
       labels:
         app: redis
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999 # Default for Redis Alpine image
+        fsGroup: 999
       containers:
       - name: redis
         image: redis:7-alpine
+        command: ["redis-server", "--requirepass", "$(REDIS_PASSWORD)"]
+        env:
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: redis-secret
+              key: REDIS_PASSWORD
         ports:
         - containerPort: 6379
 ---
