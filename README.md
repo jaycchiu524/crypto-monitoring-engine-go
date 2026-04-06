@@ -138,6 +138,12 @@ Monitor the real-time sync status and health of your applications:
 - **Username**: `admin`
 - **Password**: `<ARGOCD_PASSWORD>` (Generated during installation)
 
+### Observability Dashboard (Grafana Loki)
+Aggregate and search logs across all services:
+- **URL**: http://<NODE_IP>:30082
+- **Username**: `admin`
+- **Password**: Run `kubectl get secret --namespace observability loki-observability-grafana -o jsonpath="{.data.admin-password}" | base64 --decode ; echo` to retrieve it.
+
 ### CLI Troubleshooting Commands
 
 #### Check Cluster Health
@@ -181,4 +187,5 @@ curl http://<NODE_IP>:30080/metrics | grep crypto_price
 - [x] **Phase 4**: Kubernetes Deployment (Manual Sync)
 - [x] **Phase 5**: Security Hardening (Auth & Non-root)
 - [x] **Phase 6**: Automated CI/CD (GitHub Actions & ArgoCD)
-- [ ] **Phase 7**: Full Observability (Loki/Tempo)
+- [x] **Phase 7**: Full Observability (Loki/Promtail/Grafana)
+
