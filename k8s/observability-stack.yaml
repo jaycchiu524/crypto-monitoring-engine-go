@@ -16,6 +16,15 @@ spec:
           isDefault: true
         promtail:
           enabled: true
+          config:
+            positions:
+              filename: /tmp/positions.yaml
+          podSecurityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            seLinuxOptions:
+              type: spc_t
+
         grafana:
           enabled: true
           service:
