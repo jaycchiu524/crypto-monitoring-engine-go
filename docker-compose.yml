@@ -13,7 +13,7 @@ services:
     environment:
       - APP_ROLE=fetcher
       - REDIS_URL=redis:6379
-      - SYMBOL=btcusdt
+      - SYMBOLS=btcusdt,ethusdt,solusdt,bnbusdt
     depends_on:
       - redis
     restart: unless-stopped
@@ -25,7 +25,9 @@ services:
     environment:
       - APP_ROLE=processor
       - REDIS_URL=redis:6379
-      - SYMBOL=btcusdt
+      - SYMBOLS=btcusdt,ethusdt,solusdt,bnbusdt
+    ports:
+      - "8080:8080"
     depends_on:
       - redis
     restart: unless-stopped

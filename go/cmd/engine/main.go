@@ -2,15 +2,40 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
-	"log/slog"
 
 	"crypto-monitor/internal/broker"
 	"crypto-monitor/internal/client"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
+
+// Define our labeled Prometheus metrics. 
+var (
+	cryptoPriceGauge = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "crypto_price_usd",
+		Help: "Current price of the tracked cryptocurrency in USD",
+	}, []string{"symbol"})
+
+	cryptoTradeCounter = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "crypto_trades_total",
+		Help: "Total number of trade events processed",
+	}, []string{"symbol"})
+)
+
+type tradeEventInternal struct {
+	Symbol string `json:"s"`
+	Price  string `json:"p"`
+}
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
@@ -19,15 +44,18 @@ func main() {
 	slog.SetDefault(logger)
 
 	// Fetch required configuration
-	symbol := os.Getenv("SYMBOL")
-	if symbol == "" {
-		symbol = "btcusdt"
+	symbolsRaw := os.Getenv("SYMBOLS")
+	if symbolsRaw == "" {
+		symbolsRaw = "btcusdt"
 	}
-	symbol = strings.ToLower(symbol)
+	symbols := strings.Split(symbolsRaw, ",")
+	for i, s := range symbols {
+		symbols[i] = strings.TrimSpace(strings.ToLower(s))
+	}
 
 	role := os.Getenv("APP_ROLE")
 	if role == "" {
-		role = "fetcher" // default
+		role = "fetcher"
 	}
 
 	redisURL := os.Getenv("REDIS_URL")
@@ -35,13 +63,15 @@ func main() {
 		redisURL = "localhost:6379"
 	}
 
-	logger.Info("Starting Crypto Monitoring Engine", "version", "0.2.0", "role", role, "symbol", symbol)
+	logger.Info("Starting Crypto Monitoring Engine", 
+		"version", "0.4.0", 
+		"role", role, 
+		"symbols", symbols,
+	)
 
-	// Setup Graceful Shutdown Context
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// Initialize Redis Broker
 	redisBroker, err := broker.NewRedisBroker(redisURL, logger)
 	if err != nil {
 		logger.Error("Failed to initialize Redis Broker", "error", err)
@@ -49,37 +79,62 @@ func main() {
 	}
 	defer redisBroker.Close()
 
-	// Define standard channel name
 	const redisChannel = "crypto_prices"
 
-	// Dispatch logic based on role
+	if role == "processor" {
+		go func() {
+			logger.Info("Starting Prometheus metrics server on :8080/metrics")
+			http.Handle("/metrics", promhttp.Handler())
+			if err := http.ListenAndServe(":8080", nil); err != nil {
+				logger.Error("Metrics server failed", "error", err)
+			}
+		}()
+	}
+
 	switch role {
 	case "fetcher":
-		logger.Info("Initializing as Fetcher")
+		logger.Info("Initializing as Multi-Stream Fetcher")
 		
 		publishHandler := func(c context.Context, payload string) {
 			if err := redisBroker.Publish(c, redisChannel, payload); err != nil {
-				logger.Error("Failed to publish message to Redis", "error", err)
+				logger.Error("Failed to publish to Redis", "error", err)
 			}
 		}
 
-		binanceClient := client.NewBinanceClient(symbol, logger, publishHandler)
-		binanceClient.Start(ctx) // Blocks until context canceled
+		binanceClient := client.NewBinanceClient(symbols, logger, publishHandler)
+		binanceClient.Start(ctx)
 
 	case "processor":
-		logger.Info("Initializing as Processor")
+		logger.Info("Initializing as Labeled Metrics Processor")
 		
 		processHandler := func(payload string) {
-			// In Phase 5 we will parse this and increment Prometheus metrics.
-			// For now, simulating the processing by logging via the structured logger.
-			logger.Info("Processed Event from Redis", "payload", payload)
+			var event tradeEventInternal
+			if err := json.Unmarshal([]byte(payload), &event); err != nil {
+				logger.Warn("Failed to unmarshal Redis payload", "error", err)
+				return
+			}
+
+			// We use the Binance symbol (which is uppercase) in the metric labels
+			symbolLabel := strings.ToUpper(event.Symbol)
+
+			var price float64
+			_, err := fmt.Sscanf(event.Price, "%f", &price)
+			if err != nil {
+				logger.Warn("Failed to parse price", "price", event.Price, "error", err)
+				return
+			}
+
+			// Update labeled metrics
+			cryptoPriceGauge.WithLabelValues(symbolLabel).Set(price)
+			cryptoTradeCounter.WithLabelValues(symbolLabel).Inc()
+
+			logger.Debug("Update", "symbol", symbolLabel, "price", price)
 		}
 
-		// Blocks and listens on channel until context canceled
 		redisBroker.Subscribe(ctx, redisChannel, processHandler)
 
 	default:
-		logger.Error("Unknown APP_ROLE specified", "role", role)
+		logger.Error("Unknown APP_ROLE", "role", role)
 		os.Exit(1)
 	}
 

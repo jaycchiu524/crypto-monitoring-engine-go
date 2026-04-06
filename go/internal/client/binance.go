@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
 
-// binanceTradeEvent models the subset of the Binance WebSocket trade event
-// that we care about (specifically the symbol and the price).
+// binanceTradeEvent models the subset of the Binance WebSocket trade event.
 type binanceTradeEvent struct {
 	EventType string      `json:"e"` // Event type, e.g., "trade"
 	EventTime json.Number `json:"E"` // Event time, handles both string or int64
@@ -19,54 +19,58 @@ type binanceTradeEvent struct {
 	Price     string      `json:"p"` // The live trade price (Binance sends this as a string)
 }
 
-// BinanceClient manages the WebSocket connection to the Binance API.
+// combinedStreamEvent is the wrapper Binance uses when multiple streams are requested.
+type combinedStreamEvent struct {
+	Stream string          `json:"stream"`
+	Data   json.RawMessage `json:"data"`
+}
+
+// BinanceClient manages the WebSocket connection for many symbols.
 type BinanceClient struct {
-	symbol  string
+	symbols []string
 	logger  *slog.Logger
 	handler func(context.Context, string)
 }
 
-// NewBinanceClient creates a new client for a given trading symbol.
-func NewBinanceClient(symbol string, logger *slog.Logger, handler func(context.Context, string)) *BinanceClient {
+// NewBinanceClient creates a client for a list of trading symbols.
+func NewBinanceClient(symbols []string, logger *slog.Logger, handler func(context.Context, string)) *BinanceClient {
 	return &BinanceClient{
-		symbol:  symbol,
+		symbols: symbols,
 		logger:  logger,
 		handler: handler,
 	}
 }
 
-// Start begins the WebSocket connection to process the stream.
-// It will continuously attempt to reconnect on failure using an exponential backoff.
-// Complex logic: The context is used to signal a graceful shutdown. If the context is canceled,
-// the loop will exit cleanly.
+// Start begins the Combined WebSocket connection.
 func (c *BinanceClient) Start(ctx context.Context) {
-	// Format the stream URL based on Binance's public spec (e.g., btcusdt@trade)
-	url := fmt.Sprintf("wss://stream.binance.com:9443/ws/%s@trade", c.symbol)
-	
+	// Construct the combined stream URL:
+	// wss://stream.binance.com:9443/stream?streams=btcusdt@trade/ethusdt@trade
+	var streams []string
+	for _, s := range c.symbols {
+		streams = append(streams, fmt.Sprintf("%s@trade", strings.ToLower(s)))
+	}
+	url := fmt.Sprintf("wss://stream.binance.com:9443/stream?streams=%s", strings.Join(streams, "/"))
+
 	backoff := 1 * time.Second
 	maxBackoff := 30 * time.Second
 
 	for {
-		// Check if we should shut down before attempting to connect
 		select {
 		case <-ctx.Done():
-			c.logger.Info("Shutdown requested, stopping WebSocket client.")
+			c.logger.Info("Shutdown requested, stopping Multi-WebSocket client.")
 			return
 		default:
 		}
 
-		c.logger.Info("Connecting to Binance WebSocket...", "url", url)
+		c.logger.Info("Connecting to Binance Multi-Stream WebSocket...", "url", url)
 
 		conn, _, err := websocket.DefaultDialer.DialContext(ctx, url, nil)
 		if err != nil {
-			c.logger.Error("Failed to connect", "error", err, "reconnecting_in", backoff)
-			
-			// Wait for the backoff duration, but allow the context to interrupt it
+			c.logger.Error("Failed to connect to combined stream", "error", err, "reconnecting_in", backoff)
 			select {
 			case <-ctx.Done():
 				return
 			case <-time.After(backoff):
-				// Exponential backoff logic
 				backoff *= 2
 				if backoff > maxBackoff {
 					backoff = maxBackoff
@@ -75,24 +79,18 @@ func (c *BinanceClient) Start(ctx context.Context) {
 			}
 		}
 
-		// Reset backoff on a successful connection
 		backoff = 1 * time.Second
-		c.logger.Info("Connected to Binance successfully")
+		c.logger.Info("Connected to Binance combined stream successfully")
 
-		// Read and process messages. This will block until the connection is closed or an error occurs.
 		c.readLoop(ctx, conn)
-
-		// Ensure we clean up the connection before trying to reconnect
 		conn.Close()
 	}
 }
 
-// readLoop continuously reads messages from the active WebSocket connection.
+// readLoop reads the multi-stream messages and extracts the 'data' portion.
 func (c *BinanceClient) readLoop(ctx context.Context, conn *websocket.Conn) {
-	// A channel to pipe errors from the read routine so we can break out of the loop
 	errChan := make(chan error, 1)
 
-	// We run the connection reading in a goroutine so we can gracefully shut down via the context.
 	go func() {
 		for {
 			_, message, err := conn.ReadMessage()
@@ -101,26 +99,25 @@ func (c *BinanceClient) readLoop(ctx context.Context, conn *websocket.Conn) {
 				return
 			}
 
-			var event binanceTradeEvent
-			if err := json.Unmarshal(message, &event); err != nil {
-				c.logger.Warn("Failed to unmarshal message", "error", err, "payload", string(message))
+			// Since we are using combined streams, the message is wrapped.
+			var combined combinedStreamEvent
+			if err := json.Unmarshal(message, &combined); err != nil {
+				c.logger.Warn("Failed to unmarshal outer combined stream", "error", err)
 				continue
 			}
 
-			// Pass the raw message up to the handler if provided
+			// We pass the inner 'data' payload to the handler (this keeps the handler format the same as Phase 2).
 			if c.handler != nil {
-				c.handler(ctx, string(message))
+				c.handler(ctx, string(combined.Data))
 			}
 		}
 	}()
 
-	// Wait for either an error from the reader or a context cancellation
 	select {
 	case <-ctx.Done():
-		c.logger.Info("Closing WebSocket connection due to shutdown signal")
-		// Write a close message to gracefully close the websocket on the remote side
+		c.logger.Info("Closing Multi-WebSocket connection due to shutdown")
 		_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 	case err := <-errChan:
-		c.logger.Error("Connection dropped", "reason", err)
+		c.logger.Error("Multi-Stream connection dropped", "reason", err)
 	}
 }
