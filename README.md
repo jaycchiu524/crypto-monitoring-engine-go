@@ -136,7 +136,7 @@ Edit the `Deployment` manifests in [k8s/crypto-engine.yaml](file:///Users/jaychi
 Monitor the real-time sync status and health of your applications:
 - **URL**: http://<NODE_IP>:30081
 - **Username**: `admin`
-- **Password**: `<ARGOCD_PASSWORD>` (Generated during installation)
+- **Password**: Run `kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d; echo`
 
 ### Observability Dashboard (Grafana Loki)
 Aggregate and search logs across all services:
