@@ -1,0 +1,75 @@
+---
+# This playbook automates the installation of a single-node K3s cluster on a RHEL 9.7 machine.
+# It handles firewall rules, SELinux policies, and fetches the kubeconfig to your local Mac.
+- name: Setup K3s Cluster on RHEL 9.7 (Homelab)
+  hosts: homelab              # Targeting the 'homelab' group defined in inventory.ini
+  become: yes                 # Run all tasks as root using sudo
+  
+  tasks:
+    # K3s depends on firewalld being active to manage its own rules.
+    - name: Ensure Firewalld is running
+      systemd:
+        name: firewalld
+        state: started
+        enabled: yes
+
+    # Open specific ports required for Kubernetes to function.
+    - name: Configure Firewalld ports for K3s
+      firewalld:
+        port: "{{ item }}"    # Iterates through the list below
+        permanent: yes        # Survives a reboot
+        state: enabled        # Active immediately
+        immediate: yes        # Apply now without a reload
+      loop:
+        - 6443/tcp            # Kubernetes API Server (how kubectl talks to the node)
+        - 10250/tcp           # Kubelet API (used for node-to-node metrics/logs)
+        - 2379/tcp            # etcd client (database storage for K8s)
+        - 2380/tcp            # etcd peer (for future multi-node high availability)
+        - 8472/udp            # Flannel VXLAN overlay (how pods talk to each other)
+        - 51820/udp           # Wireguard VPN port (optional, used by some K3s versions)
+        - 51821/udp           # Wireguard VPN port (optional)
+
+    # Masquerade is essential for the "Internal Network" of K8s. 
+    # It allows Pods to access the outside world through the server's IP.
+    - name: Allow internal pod-to-pod traffic in Firewalld
+      command: firewall-cmd --zone=public --add-masquerade --permanent
+      notify: Reload Firewalld # Trigger the handler at the bottom if this changes
+
+    # This is the main installer. 
+    # --write-kubeconfig-mode 644: Allows non-root users (like 'ansible') to read the cluster config.
+    # --selinux: Installs RHEL-specific security policies so the cluster isn't blocked.
+    - name: Install K3s (Single-Node Server)
+      shell: |
+        curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--write-kubeconfig-mode 644 --selinux" sh -
+      register: k3s_install
+      changed_when: "'Created symlink' in k3s_install.stdout"
+
+    # We wait because K3s takes 10-30 seconds to start its internal components.
+    - name: Wait for K3s to be ready
+      shell: /usr/local/bin/k3s kubectl get nodes
+      register: nodes
+      until: nodes.stdout.find("Ready") != -1
+      retries: 5              # Try 5 times
+      delay: 10               # Wait 10 seconds between tries
+
+    # Pull the cluster "passport" file back to your Mac.
+    - name: Get the K3s kubeconfig
+      fetch:
+        src: /etc/rancher/k3s/k3s.yaml
+        dest: "./k3s-homelab.yaml" # Saved in the current directory on your Mac
+        flat: yes                 # Prevents Ansible from creating a subfolder hierarchy
+
+    # The original file says '127.0.0.1'. We change it to the server's real IP 
+    # so you can use 'kubectl' from your Mac desk.
+    - name: Update the server IP in the local kubeconfig
+      delegate_to: localhost      # Run this task ON YOUR MAC, not the server
+      become: no                  # Don't use sudo on your Mac
+      replace:
+        path: "./k3s-homelab.yaml"
+        regexp: '127.0.0.1'
+        replace: "{{ ansible_host }}" # Uses the IP from inventory.ini
+
+  # Handlers only run if a task "notifies" them (e.g., if masquerade was added).
+  handlers:
+    - name: Reload Firewalld
+      command: firewall-cmd --reload
