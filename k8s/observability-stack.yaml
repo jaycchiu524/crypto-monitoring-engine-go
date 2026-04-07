@@ -27,6 +27,8 @@ spec:
         prometheus:
           enabled: true
           isDefault: false
+          prometheus-node-exporter:
+            enabled: false
 
         grafana:
           enabled: true
