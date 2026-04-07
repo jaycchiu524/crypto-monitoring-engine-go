@@ -24,6 +24,9 @@ spec:
             runAsGroup: 0
             seLinuxOptions:
               type: spc_t
+        prometheus:
+          enabled: true
+          isDefault: false
 
         grafana:
           enabled: true
